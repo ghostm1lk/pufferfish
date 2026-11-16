@@ -52,7 +52,9 @@ static int from_table(int score, int ply) {
 
 // has this position occurred before, in the game or earlier in this line?
 // only positions since the last capture or pawn move can match, and only
-// every second one has the same side to move
+// every second one has the same side to move.
+// history must end with the position b was reached from, so the entry
+// two from the end is the most recent one with b's side to move
 static int is_repetition(const Board *b) {
     for (int i = history_len - 2; i >= 0 && i >= history_len - b->halfmove; i -= 2) {
         if (history[i] == b->key) return 1;
@@ -177,12 +179,9 @@ static int negamax(const Board *b, int depth, int ply, int alpha, int beta) {
 
         // a repeated position scores as a draw. one repetition is enough:
         // if it can happen once, it can happen again
-        int score = 0;
-        if (!is_repetition(&next)) {
-            history[history_len++] = b->key;
-            score = -negamax(&next, depth - 1, ply + 1, -beta, -alpha);
-            history_len--;
-        }
+        history[history_len++] = b->key;
+        int score = is_repetition(&next) ? 0 : -negamax(&next, depth - 1, ply + 1, -beta, -alpha);
+        history_len--;
 
         if (score > alpha) {
             alpha = score;
@@ -239,12 +238,9 @@ Move search(const Board *b, int max_depth, int time_ms) {
         for (int i = 0; i < list.count; i++) {
             Board next = *b;
             make_move(&next, list.moves[i]);
-            int score = 0;
-            if (!is_repetition(&next)) {
-                history[history_len++] = b->key;
-                score = -negamax(&next, depth - 1, 1, -INF, -alpha);
-                history_len--;
-            }
+            history[history_len++] = b->key;
+            int score = is_repetition(&next) ? 0 : -negamax(&next, depth - 1, 1, -INF, -alpha);
+            history_len--;
             if (stopped) break;
             if (score > alpha) {
                 alpha = score;

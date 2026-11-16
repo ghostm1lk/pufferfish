@@ -97,6 +97,21 @@ static int run_tests(void) {
     if (!ok) failed++;
     printf("%s  mate in one  expected a1a8  got %s\n", ok ? "PASS" : "FAIL", str);
 
+    // repetition check: black is a queen down, and after Ka2 Kh7 Ka1 the move
+    // Kh8 brings back the first position. a draw beats being lost, so play it
+    parse_fen(&b, "7k/8/8/8/8/8/8/KQ6 w - - 0 1");
+    static const Move shuffle[3] = {MOVE(0, 8, QUIET), MOVE(63, 55, QUIET), MOVE(8, 0, QUIET)};
+    history_len = 0;
+    for (int i = 0; i < 3; i++) {
+        history[history_len++] = b.key;
+        make_move(&b, shuffle[i]);
+    }
+    move_to_str(search(&b, 2, 1000), str);
+    history_len = 0;
+    ok = strcmp(str, "h7h8") == 0;
+    if (!ok) failed++;
+    printf("%s  repetition  expected h7h8  got %s\n", ok ? "PASS" : "FAIL", str);
+
     // quiescence check: Qxd5 wins a pawn but loses the queen to cxd5.
     // a depth 1 search that stops right after the capture would play it
     parse_fen(&b, "4k3/8/2p5/3p4/8/8/3Q4/4K3 w - - 0 1");
