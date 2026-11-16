@@ -11,6 +11,8 @@ enum { PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING };
 enum { NO_SQ = 64 };
 enum { CASTLE_WK = 1, CASTLE_WQ = 2, CASTLE_BK = 4, CASTLE_BQ = 8 };
 
+#define START_FEN "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+
 // move = from (6 bits) | to (6 bits) | flags (4 bits)
 enum {
     QUIET = 0,
@@ -61,5 +63,11 @@ void move_to_str(Move m, char *out);
 
 // movegen.c
 void generate_moves(const Board *b, MoveList *list);
+
+// search.c
+Move search(const Board *b, int max_depth, int time_ms);
+
+// uci.c
+void uci_loop(void);
 
 #endif

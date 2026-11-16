@@ -4,8 +4,6 @@
 #include <time.h>
 #include "pufferfish.h"
 
-#define START_FEN "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-
 // counts every position reachable in exactly `depth` moves.
 // if this matches the known numbers, move generation is correct
 static U64 perft(const Board *b, int depth) {
@@ -66,11 +64,27 @@ static int run_tests(void) {
         printf("%s  depth %d  expected %llu  got %llu\n", ok ? "PASS" : "FAIL", tests[i].depth,
                (unsigned long long)tests[i].expected, (unsigned long long)got);
     }
+
+    // search check: the only mate in one here is Ra8
+    Board b;
+    char str[6];
+    parse_fen(&b, "6k1/5ppp/8/8/8/8/8/R3K3 w - - 0 1");
+    move_to_str(search(&b, 2, 1000), str);
+    int ok = strcmp(str, "a1a8") == 0;
+    if (!ok) failed++;
+    printf("%s  mate in one  expected a1a8  got %s\n", ok ? "PASS" : "FAIL", str);
+
     return failed;
 }
 
 int main(int argc, char **argv) {
     init_tables();
+
+    // no arguments means a chess gui is talking to us
+    if (argc == 1) {
+        uci_loop();
+        return 0;
+    }
 
     if (argc >= 2 && strcmp(argv[1], "test") == 0) {
         return run_tests() ? 1 : 0;
@@ -87,6 +101,8 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    fprintf(stderr, "usage: pufferfish test\n       pufferfish perft <depth> [\"fen\"]\n");
+    fprintf(stderr, "usage: pufferfish                      (uci mode)\n"
+                    "       pufferfish test\n"
+                    "       pufferfish perft <depth> [\"fen\"]\n");
     return 1;
 }
