@@ -38,6 +38,7 @@ typedef struct {
     int castle;
     int halfmove;
     int fullmove;
+    U64 key;            // zobrist hash of the position
 } Board;
 
 typedef struct {
@@ -51,12 +52,20 @@ static inline int pop_lsb(U64 *bb) {
     return sq;
 }
 
+// piece type of `color` standing on sq. only call it when one is there
+static inline int piece_on(const Board *b, int color, int sq) {
+    int piece = PAWN;
+    while (!(b->pieces[color][piece] & (1ULL << sq))) piece++;
+    return piece;
+}
+
 // board.c
 extern U64 knight_attacks[64], king_attacks[64], pawn_attacks[2][64];
 void init_tables(void);
 U64 bishop_attacks(int sq, U64 occ);
 U64 rook_attacks(int sq, U64 occ);
 int is_attacked(const Board *b, int sq, int by);
+U64 compute_key(const Board *b);
 int parse_fen(Board *b, const char *fen);
 int make_move(Board *b, Move m);
 void move_to_str(Move m, char *out);
@@ -64,7 +73,15 @@ void move_to_str(Move m, char *out);
 // movegen.c
 void generate_moves(const Board *b, MoveList *list);
 
+// eval.c
+int evaluate(const Board *b);
+
 // search.c
+// keys of the positions that led to the one being searched, oldest first.
+// uci.c fills this from the game's moves so the search can see repetitions
+extern U64 history[1024];
+extern int history_len;
+void clear_hash(void);
 Move search(const Board *b, int max_depth, int time_ms);
 
 // uci.c

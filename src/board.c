@@ -10,6 +10,21 @@ U64 knight_attacks[64], king_attacks[64], pawn_attacks[2][64];
 // castling rights that survive a move touching each square
 static int castle_mask[64];
 
+// zobrist hashing: every (color, piece, square) gets a random 64-bit number,
+// and a position's key is the xor of the numbers for everything on the board.
+// xor undoes itself, so moving a piece is two cheap xors on the old key
+static U64 zobrist_piece[2][6][64], zobrist_castle[16], zobrist_ep[8], zobrist_side;
+
+// xorshift, a tiny random number generator. the seed is fixed so keys
+// are the same on every run, which keeps bugs reproducible
+static U64 random_u64(void) {
+    static U64 state = 0x9E3779B97F4A7C15ULL;
+    state ^= state << 13;
+    state ^= state >> 7;
+    state ^= state << 17;
+    return state;
+}
+
 // builds an attack mask from a list of (file, rank) steps
 static U64 step_mask(int sq, const int steps[][2], int n) {
     U64 bb = 0;
@@ -40,6 +55,13 @@ void init_tables(void) {
     castle_mask[56] = ~CASTLE_BQ;                // a8
     castle_mask[60] = ~(CASTLE_BK | CASTLE_BQ);  // e8
     castle_mask[63] = ~CASTLE_BK;                // h8
+
+    for (int c = WHITE; c <= BLACK; c++)
+        for (int p = PAWN; p <= KING; p++)
+            for (int sq = 0; sq < 64; sq++) zobrist_piece[c][p][sq] = random_u64();
+    for (int i = 0; i < 16; i++) zobrist_castle[i] = random_u64();
+    for (int i = 0; i < 8; i++) zobrist_ep[i] = random_u64();
+    zobrist_side = random_u64();
 }
 
 // walks one direction until it hits a piece or the edge.
@@ -88,6 +110,22 @@ static void update_occ(Board *b) {
     b->occ[BOTH] = b->occ[WHITE] | b->occ[BLACK];
 }
 
+// builds the key from scratch. make_move updates it incrementally instead,
+// and the test suite checks that both always agree
+U64 compute_key(const Board *b) {
+    U64 key = 0;
+    for (int c = WHITE; c <= BLACK; c++) {
+        for (int p = PAWN; p <= KING; p++) {
+            U64 bb = b->pieces[c][p];
+            while (bb) key ^= zobrist_piece[c][p][pop_lsb(&bb)];
+        }
+    }
+    key ^= zobrist_castle[b->castle];
+    if (b->ep != NO_SQ) key ^= zobrist_ep[b->ep & 7];
+    if (b->side == BLACK) key ^= zobrist_side;
+    return key;
+}
+
 // returns 1 on success, 0 if the fen is malformed
 int parse_fen(Board *b, const char *fen) {
     static const char letters[] = "pnbrqk";
@@ -131,7 +169,14 @@ int parse_fen(Board *b, const char *fen) {
     if (__builtin_popcountll(b->pieces[BLACK][KING]) != 1) return 0;
 
     update_occ(b);
+    b->key = compute_key(b);
     return 1;
+}
+
+// adds or removes a piece, keeping the key in sync
+static void toggle(Board *b, int color, int piece, int sq) {
+    b->pieces[color][piece] ^= 1ULL << sq;
+    b->key ^= zobrist_piece[color][piece][sq];
 }
 
 // plays a pseudo-legal move on the board.
@@ -140,28 +185,39 @@ int parse_fen(Board *b, const char *fen) {
 int make_move(Board *b, Move m) {
     int from = FROM(m), to = TO(m), flags = FLAGS(m);
     int us = b->side, them = us ^ 1;
-    U64 from_bb = 1ULL << from, to_bb = 1ULL << to;
+    int piece = piece_on(b, us, from);
 
-    int piece = PAWN;
-    while (!(b->pieces[us][piece] & from_bb)) piece++;
+    // take the old en passant and castling state out of the key.
+    // the new state goes back in further down
+    if (b->ep != NO_SQ) b->key ^= zobrist_ep[b->ep & 7];
+    b->key ^= zobrist_castle[b->castle];
 
     if (flags & CAPTURE) {
         // en passant is the one capture where the victim isn't on the target square
         int victim_sq = to;
         if (flags == EP_CAPTURE) victim_sq = us == WHITE ? to - 8 : to + 8;
-        for (int p = PAWN; p <= KING; p++) b->pieces[them][p] &= ~(1ULL << victim_sq);
+        toggle(b, them, piece_on(b, them, victim_sq), victim_sq);
     }
 
-    b->pieces[us][piece] ^= from_bb;
-    if (flags & PROMO) b->pieces[us][KNIGHT + (flags & 3)] |= to_bb;
-    else b->pieces[us][piece] |= to_bb;
+    toggle(b, us, piece, from);
+    toggle(b, us, (flags & PROMO) ? KNIGHT + (flags & 3) : piece, to);
 
     // castling also moves the rook
-    if (flags == KING_CASTLE) b->pieces[us][ROOK] ^= (1ULL << (to + 1)) | (1ULL << (to - 1));
-    if (flags == QUEEN_CASTLE) b->pieces[us][ROOK] ^= (1ULL << (to - 2)) | (1ULL << (to + 1));
+    if (flags == KING_CASTLE) {
+        toggle(b, us, ROOK, to + 1);
+        toggle(b, us, ROOK, to - 1);
+    }
+    if (flags == QUEEN_CASTLE) {
+        toggle(b, us, ROOK, to - 2);
+        toggle(b, us, ROOK, to + 1);
+    }
 
     b->ep = flags == DOUBLE_PUSH ? (from + to) / 2 : NO_SQ;
     b->castle &= castle_mask[from] & castle_mask[to];
+    if (b->ep != NO_SQ) b->key ^= zobrist_ep[b->ep & 7];
+    b->key ^= zobrist_castle[b->castle];
+    b->key ^= zobrist_side;
+
     b->halfmove = (piece == PAWN || (flags & CAPTURE)) ? 0 : b->halfmove + 1;
     if (us == BLACK) b->fullmove++;
     b->side = them;

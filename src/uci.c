@@ -32,13 +32,18 @@ static void cmd_position(Board *b, char *line) {
         parse_fen(b, START_FEN);
     }
 
+    history_len = 0;
     if (!moves) return;
     for (char *tok = strtok(moves, " "); tok; tok = strtok(NULL, " ")) {
         Move m = parse_move(b, tok);
+        history[history_len++] = b->key;
         if (!m || !make_move(b, m)) {
             printf("info string illegal move %s\n", tok);
             return;
         }
+        // a capture or pawn move can't be undone, so nothing before it can
+        // repeat. the length cap leaves room for the search's own moves
+        if (b->halfmove == 0 || history_len >= 512) history_len = 0;
     }
 }
 
@@ -92,6 +97,8 @@ void uci_loop(void) {
             printf("id name Pufferfish\nid author Waleed Abdellatif\nuciok\n");
         } else if (strcmp(line, "isready") == 0) {
             printf("readyok\n");
+        } else if (strcmp(line, "ucinewgame") == 0) {
+            clear_hash();
         } else if (strncmp(line, "position", 8) == 0) {
             cmd_position(&b, line);
         } else if (strncmp(line, "go", 2) == 0) {

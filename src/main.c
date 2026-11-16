@@ -43,6 +43,21 @@ static void divide(const Board *b, int depth) {
     if (seconds > 0) printf("%.2fs, %.1fM nodes/s\n", seconds, total / seconds / 1e6);
 }
 
+// walks the move tree checking that the incrementally updated key
+// matches one computed from scratch. returns the number of mismatches
+static int check_keys(const Board *b, int depth) {
+    int bad = b->key != compute_key(b);
+    if (depth == 0) return bad;
+
+    MoveList list;
+    generate_moves(b, &list);
+    for (int i = 0; i < list.count; i++) {
+        Board next = *b;
+        if (make_move(&next, list.moves[i])) bad += check_keys(&next, depth - 1);
+    }
+    return bad;
+}
+
 // standard perft positions from the chess programming wiki.
 // between them they cover castling, en passant, promotions and pins
 static int run_tests(void) {
@@ -65,14 +80,30 @@ static int run_tests(void) {
                (unsigned long long)tests[i].expected, (unsigned long long)got);
     }
 
-    // search check: the only mate in one here is Ra8
+    // hash check on two positions that cover castling, en passant and promotions
     Board b;
     char str[6];
+    parse_fen(&b, tests[1].fen);
+    int bad_keys = check_keys(&b, 3);
+    parse_fen(&b, tests[3].fen);
+    bad_keys += check_keys(&b, 3);
+    if (bad_keys) failed++;
+    printf("%s  hash keys  %d mismatches\n", bad_keys ? "FAIL" : "PASS", bad_keys);
+
+    // search check: the only mate in one here is Ra8
     parse_fen(&b, "6k1/5ppp/8/8/8/8/8/R3K3 w - - 0 1");
     move_to_str(search(&b, 2, 1000), str);
     int ok = strcmp(str, "a1a8") == 0;
     if (!ok) failed++;
     printf("%s  mate in one  expected a1a8  got %s\n", ok ? "PASS" : "FAIL", str);
+
+    // quiescence check: Qxd5 wins a pawn but loses the queen to cxd5.
+    // a depth 1 search that stops right after the capture would play it
+    parse_fen(&b, "4k3/8/2p5/3p4/8/8/3Q4/4K3 w - - 0 1");
+    move_to_str(search(&b, 1, 1000), str);
+    ok = strcmp(str, "d2d5") != 0;
+    if (!ok) failed++;
+    printf("%s  defended pawn  expected anything but d2d5  got %s\n", ok ? "PASS" : "FAIL", str);
 
     return failed;
 }
